@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>교사총회 선물 신청</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <p class="eyebrow">교회학교 교사총회</p>
+      <h1 id="title">선물 신청</h1>
+      <p id="notice" class="notice"></p>
+      <p id="demo-badge" class="demo" hidden>미리보기 모드 — 실제로 저장되지 않습니다</p>
+    </header>
+
+    <p id="loading" class="status">불러오는 중…</p>
+    <p id="load-error" class="status error" hidden>
+      불러오지 못했습니다. <button type="button" id="retry" class="link">다시 시도</button>
+    </p>
+
+    <form id="form" hidden novalidate>
+      <section class="card">
+        <h2><span class="step">1</span> 내 정보</h2>
+        <div class="fields">
+          <label>
+            <span>부서</span>
+            <select id="dept" required>
+              <option value="">선택해주세요</option>
+            </select>
+          </label>
+          <label>
+            <span>이름</span>
+            <input id="name" type="text" maxlength="20" autocomplete="name" placeholder="홍길동" required>
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="step">2</span> 선물 고르기</h2>
+        <div id="gifts" class="gifts" role="radiogroup" aria-label="선물 목록"></div>
+      </section>
+
+      <p id="form-error" class="error" role="alert" hidden></p>
+      <p id="closed" class="status" hidden>신청이 마감되었습니다. 감사합니다.</p>
+      <button id="submit" type="submit" class="primary">신청하기</button>
+    </form>
+
+    <section id="done" class="card done" hidden>
+      <div class="check" aria-hidden="true">✓</div>
+      <h2 id="done-title">신청이 완료되었습니다</h2>
+      <p id="done-detail"></p>
+      <button type="button" id="again" class="link">다른 사람 신청 / 선물 변경</button>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
