@@ -4,6 +4,8 @@
   var API_URL = (window.GIFT_API_URL || '').trim();
   var $ = function (id) { return document.getElementById(id); };
   var selectedGiftId = '';
+  var selectedOption = '';
+  var lastState = null;
   var submitting = false;
 
   // ---------- API ----------
@@ -36,6 +38,7 @@
   }
 
   function render(state) {
+    lastState = state;
     document.title = state.title;
     $('title').textContent = state.title;
     $('notice').textContent = state.notice || '';
@@ -51,53 +54,96 @@
     var box = $('gifts');
     box.textContent = '';
     state.gifts.forEach(function (g) {
-      var soldout = g.remaining <= 0;
-      if (soldout && selectedGiftId === g.id) selectedGiftId = '';
+      var limited = g.remaining !== null && g.remaining !== undefined;
+      var soldout = limited && g.remaining <= 0;
+      if (soldout && selectedGiftId === g.id) { selectedGiftId = ''; selectedOption = ''; }
 
       var label = el('label', 'gift' + (soldout ? ' soldout' : ''));
       var input = el('input');
       input.type = 'radio'; input.name = 'gift'; input.value = g.id;
       input.disabled = soldout || state.closed;
       input.checked = selectedGiftId === g.id;
-      input.addEventListener('change', function () { selectedGiftId = g.id; showError(''); });
+      input.addEventListener('change', function () {
+        selectedGiftId = g.id; selectedOption = '';
+        showError(''); syncSelection();
+      });
 
       var thumb = el('div', 'thumb');
       if (g.image) {
         var img = el('img');
         img.src = g.image; img.alt = ''; img.loading = 'lazy';
-        img.onerror = function () { thumb.textContent = '🎁'; };
+        img.onerror = function () { img.remove(); thumb.classList.add('empty'); };
         thumb.appendChild(img);
       } else {
-        thumb.textContent = '🎁';
+        thumb.classList.add('empty');
+      }
+      if (limited) {
+        thumb.appendChild(el('span', 'stock' + (soldout ? ' none' : ''),
+          soldout ? '마감' : '남은 수량 ' + g.remaining));
       }
 
-      var info = el('div');
+      var info = el('div', 'info');
       info.appendChild(el('div', 'gift-name', g.name));
       if (g.desc) info.appendChild(el('div', 'gift-desc', g.desc));
 
-      var stock = el('span', 'stock' + (soldout ? ' none' : g.remaining <= 3 ? ' low' : ''),
-        soldout ? '마감' : '남은 수량 ' + g.remaining);
+      var options = g.options || [];
+      if (options.length) {
+        var opts = el('div', 'opts');
+        options.forEach(function (o) {
+          var b = el('button', 'opt', o);
+          b.type = 'button';
+          b.dataset.gift = g.id; b.dataset.option = o;
+          b.addEventListener('click', function () {
+            selectedOption = o; showError(''); syncSelection();
+          });
+          opts.appendChild(b);
+        });
+        info.appendChild(opts);
+      }
 
-      label.appendChild(input); label.appendChild(thumb); label.appendChild(info); label.appendChild(stock);
+      label.appendChild(input); label.appendChild(thumb); label.appendChild(info);
       box.appendChild(label);
     });
 
     show('closed', state.closed);
-    show('submit', !state.closed);
+    show('bar', !state.closed);
+    syncSelection();
+  }
+
+  function selectedGift() {
+    if (!lastState) return null;
+    return lastState.gifts.filter(function (g) { return g.id === selectedGiftId; })[0] || null;
+  }
+
+  // 옵션 버튼 표시와 아래쪽 "선택한 선물" 문구를 현재 선택에 맞춘다.
+  function syncSelection() {
+    Array.prototype.forEach.call(document.querySelectorAll('.opt'), function (b) {
+      var on = b.dataset.gift === selectedGiftId && b.dataset.option === selectedOption;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    var g = selectedGift();
+    $('picked').textContent = g
+      ? '선택: ' + g.name + (selectedOption ? ' (' + selectedOption + ')' : '')
+      : '선물을 선택해주세요';
   }
 
   function submit(replace) {
     if (submitting) return;
     var dept = $('dept').value;
     var name = $('name').value.replace(/\s+/g, ' ').trim();
+    var gift = selectedGift();
 
     if (!dept) return showError('부서를 선택해주세요.');
     if (!name) return showError('이름을 입력해주세요.');
-    if (!selectedGiftId) return showError('선물을 선택해주세요.');
+    if (!gift) return showError('선물을 선택해주세요.');
+    if ((gift.options || []).length && !selectedOption) {
+      return showError('"' + gift.name + '"의 옵션(' + gift.options.join(' / ') + ')을 선택해주세요.');
+    }
     showError('');
 
     setBusy(true);
-    api.apply({ dept: dept, name: name, giftId: selectedGiftId, replace: !!replace })
+    api.apply({ dept: dept, name: name, giftId: selectedGiftId, option: selectedOption, replace: !!replace })
       .then(function (res) {
         setBusy(false);
         if (res.state) render(res.state);
@@ -110,7 +156,7 @@
           return;
         }
         if (res.code === 'DUPLICATE') {
-          var msg = dept + ' ' + name + ' 선생님은 이미 "' + res.currentGiftName + '"(으)로 신청하셨습니다.\n선택한 선물로 변경할까요?';
+          var msg = dept + ' ' + name + ' 선생님은 이미 "' + res.currentGiftName + '"(으)로 신청하셨습니다.\n지금 선택한 선물로 변경할까요?';
           if (window.confirm(msg)) submit(true);
           return;
         }
@@ -146,11 +192,10 @@
   function mockApi() {
     var KEY = 'gift-demo-apps';
     var gifts = [
-      { id: '1', name: '텀블러', desc: '보온·보냉 스테인리스 텀블러', image: '', total: 5 },
-      { id: '2', name: '핸드크림 세트', desc: '겨울철 필수 핸드크림 3종', image: '', total: 5 },
-      { id: '3', name: '커피 드립백 세트', desc: '드립백 커피 10개입', image: '', total: 2 },
-      { id: '4', name: '무릎담요', desc: '부드러운 극세사 담요', image: '', total: 5 },
-      { id: '5', name: '도서상품권', desc: '도서문화상품권 1만원권', image: '', total: 0 }
+      { id: '1', name: '텀블러', desc: '355ml', image: 'images/tumbler-green.jpg', options: [], total: null },
+      { id: '2', name: '성경전서', desc: '색상 선택', image: '', options: ['그레이', '베이지', '버터'], total: null },
+      { id: '3', name: '장갑', desc: '사이즈 선택 · 선착순 3명', image: 'images/gloves.jpg', options: ['S', 'M', 'L'], total: 3 },
+      { id: '4', name: '머그', desc: '품절 예시', image: 'images/mug.jpg', options: [], total: 0 }
     ];
     function apps() {
       try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
@@ -168,7 +213,7 @@
         departments: ['유아부', '유치부', '유년부', '초등부', '청소년부'],
         gifts: gifts.map(function (g) {
           var used = list.filter(function (a) { return a.giftId === g.id; }).length;
-          return Object.assign({}, g, { remaining: Math.max(0, g.total - used) });
+          return Object.assign({}, g, { remaining: g.total === null ? null : Math.max(0, g.total - used) });
         })
       };
     }
@@ -181,15 +226,17 @@
         var idx = -1;
         list.forEach(function (a, i) { if (a.dept === p.dept && a.name === p.name) idx = i; });
         var res;
-        if (idx >= 0 && list[idx].giftId === p.giftId) {
-          res = { ok: true, code: 'ALREADY', giftName: gift.name };
+        var label = gift.name + (p.option ? ' (' + p.option + ')' : '');
+        var same = idx >= 0 && list[idx].giftId === p.giftId;
+        if (same && list[idx].option === p.option) {
+          res = { ok: true, code: 'ALREADY', giftName: label };
         } else if (idx >= 0 && !p.replace) {
-          res = { ok: false, code: 'DUPLICATE', currentGiftName: list[idx].giftName };
-        } else if (gift.remaining <= 0) {
+          res = { ok: false, code: 'DUPLICATE', currentGiftName: list[idx].label };
+        } else if (!same && gift.remaining !== null && gift.remaining <= 0) {
           res = { ok: false, code: 'SOLD_OUT', message: '마감된 선물입니다. 다른 선물을 골라주세요.' };
         } else {
-          var rec = { dept: p.dept, name: p.name, giftId: gift.id, giftName: gift.name };
-          res = { ok: true, code: idx >= 0 ? 'CHANGED' : 'APPLIED', giftName: gift.name };
+          var rec = { dept: p.dept, name: p.name, giftId: gift.id, option: p.option, label: label };
+          res = { ok: true, code: idx >= 0 ? 'CHANGED' : 'APPLIED', giftName: label };
           if (idx >= 0) list[idx] = rec; else list.push(rec);
           save(list);
         }
@@ -204,7 +251,7 @@
   $('form').addEventListener('submit', function (e) { e.preventDefault(); submit(false); });
   $('retry').addEventListener('click', load);
   $('again').addEventListener('click', function () {
-    selectedGiftId = '';
+    selectedGiftId = ''; selectedOption = '';
     $('name').value = '';
     show('done', false);
     load();

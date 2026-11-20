@@ -43,9 +43,12 @@
         <div id="gifts" class="gifts" role="radiogroup" aria-label="선물 목록"></div>
       </section>
 
-      <p id="form-error" class="error" role="alert" hidden></p>
       <p id="closed" class="status" hidden>신청이 마감되었습니다. 감사합니다.</p>
-      <button id="submit" type="submit" class="primary">신청하기</button>
+      <div id="bar" class="bar">
+        <p id="form-error" class="error" role="alert" hidden></p>
+        <p id="picked" class="picked">선물을 선택해주세요</p>
+        <button id="submit" type="submit" class="primary">신청하기</button>
+      </div>
     </form>
 
     <section id="done" class="card done" hidden>

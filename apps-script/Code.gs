@@ -2,10 +2,12 @@
  * 교사총회 선물 신청 - Google Apps Script 백엔드
  *
  * 구글 시트가 DB 역할을 합니다.
- *  - [선물] 시트 : ID / 이름 / 설명 / 이미지 / 수량
+ *  - [선물] 시트 : ID / 이름 / 설명 / 이미지 / 수량(비우면 무제한) / 옵션(쉼표로 구분) / 가격
+ *                  가격은 시트에서만 보이고 신청 페이지에는 전달되지 않습니다.
  *  - [부서] 시트 : 부서명
  *  - [설정] 시트 : 제목 / 안내문구 / 마감(Y,N)
- *  - [신청] 시트 : 신청시각 / 부서 / 이름 / 선물ID / 선물명
+ *  - [신청] 시트 : 신청시각 / 부서 / 이름 / 선물ID / 선물명 / 옵션
+ *  - [집계] 시트 : 선물·옵션별 신청 수 (자동 계산)
  *
  * 최초 1회 setup() 함수를 실행하면 시트가 자동으로 만들어집니다.
  */
@@ -14,18 +16,16 @@ const SHEET_GIFTS = '선물';
 const SHEET_DEPTS = '부서';
 const SHEET_SETTINGS = '설정';
 const SHEET_APPS = '신청';
+const SHEET_SUMMARY = '집계';
 
 /** 최초 1회 실행: 시트와 예시 데이터를 만든다. (이미 있는 시트는 건드리지 않음) */
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   ensureSheet_(ss, SHEET_GIFTS, [
-    ['ID', '이름', '설명', '이미지', '수량'],
-    ['1', '텀블러', '보온·보냉 스테인리스 텀블러', '', 20],
-    ['2', '핸드크림 세트', '겨울철 필수 핸드크림 3종', '', 20],
-    ['3', '커피 드립백 세트', '드립백 커피 10개입', '', 20],
-    ['4', '무릎담요', '부드러운 극세사 담요', '', 20],
-    ['5', '도서상품권', '도서문화상품권 1만원권', '', 20],
+    ['ID', '이름', '설명', '이미지', '수량', '옵션', '가격'],
+    ['1', '텀블러', '보온·보냉 스테인리스 텀블러', '', '', '', 0],
+    ['2', '장갑', '사이즈 선택 · 선착순 3명', '', 3, 'S,M,L', 0],
   ]);
   ensureSheet_(ss, SHEET_DEPTS, [
     ['부서명'],
@@ -38,8 +38,16 @@ function setup() {
     ['마감', 'N'],
   ]);
   ensureSheet_(ss, SHEET_APPS, [
-    ['신청시각', '부서', '이름', '선물ID', '선물명'],
+    ['신청시각', '부서', '이름', '선물ID', '선물명', '옵션'],
   ]);
+  // 예전 버전으로 만든 [신청] 시트에는 옵션 칸 제목이 없으므로 채워준다.
+  const apps = ss.getSheetByName(SHEET_APPS);
+  if (!String(apps.getRange(1, 6).getValue()).trim()) {
+    apps.getRange(1, 6).setValue('옵션').setFontWeight('bold');
+  }
+  ensureSheet_(ss, SHEET_SUMMARY, [[
+    "=QUERY('신청'!A:F, \"select E, F, count(C) where C is not null group by E, F label E '선물', F '옵션', count(C) '신청수'\", 1)",
+  ]]);
 }
 
 function ensureSheet_(ss, name, rows) {
@@ -67,6 +75,7 @@ function doPost(e) {
   const dept = clean_(req.dept);
   const name = clean_(req.name);
   const giftId = String(req.giftId || '').trim();
+  const option = clean_(req.option);
   const replace = req.replace === true;
 
   if (!dept || !name || !giftId) {
@@ -96,10 +105,14 @@ function doPost(e) {
     if (!gift) {
       return json_({ ok: false, code: 'BAD_REQUEST', message: '선물을 다시 선택해주세요.', state: state });
     }
+    if (gift.options.length ? gift.options.indexOf(option) === -1 : option !== '') {
+      return json_({ ok: false, code: 'BAD_REQUEST', message: '옵션(색상/사이즈)을 선택해주세요.', state: state });
+    }
+    const label = gift.name + (option ? ' (' + option + ')' : '');
 
     const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_APPS);
     const rows = sh.getLastRow() > 1
-      ? sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues()
+      ? sh.getRange(2, 1, sh.getLastRow() - 1, 6).getValues()
       : [];
 
     // 같은 부서 + 같은 이름이면 같은 사람으로 본다 (공백 무시)
@@ -108,30 +121,33 @@ function doPost(e) {
     for (let i = 0; i < rows.length; i++) {
       if (key_(rows[i][1]) === key_(dept) && key_(rows[i][2]) === key_(name)) {
         existingRow = i + 2;
-        existing = { giftId: String(rows[i][3]), giftName: String(rows[i][4]) };
+        existing = { giftId: String(rows[i][3]).trim(), giftName: String(rows[i][4]), option: String(rows[i][5]).trim() };
         break;
       }
     }
 
-    if (existing && existing.giftId === giftId) {
-      return json_({ ok: true, code: 'ALREADY', message: '이미 같은 선물로 신청되어 있습니다.', giftName: gift.name, state: state });
+    const sameGift = !!existing && existing.giftId === giftId;
+    if (sameGift && key_(existing.option) === key_(option)) {
+      return json_({ ok: true, code: 'ALREADY', message: '이미 같은 선물로 신청되어 있습니다.', giftName: label, state: state });
     }
     if (existing && !replace) {
-      return json_({ ok: false, code: 'DUPLICATE', message: '이미 신청하셨습니다.', currentGiftName: existing.giftName, state: state });
+      const current = existing.giftName + (existing.option ? ' (' + existing.option + ')' : '');
+      return json_({ ok: false, code: 'DUPLICATE', message: '이미 신청하셨습니다.', currentGiftName: current, state: state });
     }
-    if (gift.remaining <= 0) {
+    // 같은 선물 안에서 옵션만 바꾸는 경우는 수량을 새로 차지하지 않는다.
+    if (!sameGift && gift.remaining !== null && gift.remaining <= 0) {
       return json_({ ok: false, code: 'SOLD_OUT', message: '죄송합니다. 방금 마감된 선물입니다. 다른 선물을 골라주세요.', state: state });
     }
 
-    const record = [new Date(), safe_(dept), safe_(name), gift.id, gift.name];
+    const record = [new Date(), safe_(dept), safe_(name), gift.id, gift.name, option];
     if (existing) {
-      sh.getRange(existingRow, 1, 1, 5).setValues([record]);
+      sh.getRange(existingRow, 1, 1, 6).setValues([record]);
     } else {
       sh.appendRow(record);
     }
     SpreadsheetApp.flush();
 
-    return json_({ ok: true, code: existing ? 'CHANGED' : 'APPLIED', giftName: gift.name, state: readState_() });
+    return json_({ ok: true, code: existing ? 'CHANGED' : 'APPLIED', giftName: label, state: readState_() });
   } finally {
     lock.releaseLock();
   }
@@ -155,18 +171,22 @@ function readState_() {
     if (id) counts[id] = (counts[id] || 0) + 1;
   });
 
-  const gifts = values_(ss, SHEET_GIFTS, 5)
+  // 가격(7번째 칸)은 읽지 않는다 → 신청 페이지로 나가지 않음
+  const gifts = values_(ss, SHEET_GIFTS, 6)
     .filter(function (r) { return String(r[0]).trim() && String(r[1]).trim(); })
     .map(function (r) {
       const id = String(r[0]).trim();
-      const total = Number(r[4]) || 0;
+      // 수량 칸이 비어 있으면 무제한
+      const limited = String(r[4]).trim() !== '';
+      const total = limited ? (Number(r[4]) || 0) : null;
       return {
         id: id,
         name: String(r[1]).trim(),
         desc: String(r[2]).trim(),
         image: String(r[3]).trim(),
+        options: String(r[5]).split(',').map(function (o) { return o.trim(); }).filter(String),
         total: total,
-        remaining: Math.max(0, total - (counts[id] || 0)),
+        remaining: limited ? Math.max(0, total - (counts[id] || 0)) : null,
       };
     });
 
