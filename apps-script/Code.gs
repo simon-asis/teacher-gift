@@ -5,7 +5,7 @@
  *  - [선물] 시트 : ID / 이름 / 설명 / 이미지 / 수량(비우면 무제한) / 옵션(쉼표로 구분) / 가격
  *                  가격은 시트에서만 보이고 신청 페이지에는 전달되지 않습니다.
  *  - [부서] 시트 : 부서명
- *  - [설정] 시트 : 제목 / 안내문구 / 마감(Y,N)
+ *  - [설정] 시트 : 제목 / 안내문구 / 마감(Y 로 바꾸면 즉시 종료) / 마감일시(이 시각이 지나면 자동 종료)
  *  - [신청] 시트 : 신청시각 / 부서 / 이름 / 선물ID / 선물명 / 옵션
  *  - [집계] 시트 : 선물·옵션별 신청 수 (자동 계산)
  *
@@ -36,7 +36,14 @@ function setup() {
     ['제목', '교사총회 선물 신청'],
     ['안내문구', '한 해 동안 수고 많으셨습니다. 교사 선물 취합합니다.'],
     ['마감', 'N'],
+    ['마감일시', '2026-11-24 23:59'],
   ]);
+  // 예전 버전으로 만든 [설정] 시트에 마감일시 항목이 없으면 추가한다.
+  const settingsSheet = ss.getSheetByName(SHEET_SETTINGS);
+  const keys = values_(ss, SHEET_SETTINGS, 1).map(function (r) { return String(r[0]).trim(); });
+  if (keys.indexOf('마감일시') === -1) {
+    settingsSheet.appendRow(['마감일시', '2026-11-24 23:59']);
+  }
   ensureSheet_(ss, SHEET_APPS, [
     ['신청시각', '부서', '이름', '선물ID', '선물명', '옵션'],
   ]);
@@ -157,9 +164,16 @@ function readState_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   const settings = {};
+  let deadline = null;
   values_(ss, SHEET_SETTINGS, 2).forEach(function (r) {
-    settings[String(r[0]).trim()] = String(r[1]).trim();
+    const key = String(r[0]).trim();
+    if (key === '마감일시') {
+      deadline = parseDeadline_(r[1], ss.getSpreadsheetTimeZone());
+    } else {
+      settings[key] = String(r[1]).trim();
+    }
   });
+  const expired = deadline !== null && new Date().getTime() > deadline.getTime();
 
   const departments = values_(ss, SHEET_DEPTS, 1)
     .map(function (r) { return String(r[0]).trim(); })
@@ -194,10 +208,39 @@ function readState_() {
     ok: true,
     title: settings['제목'] || '교사총회 선물 신청',
     notice: settings['안내문구'] || '',
-    closed: String(settings['마감'] || 'N').toUpperCase() === 'Y',
+    closed: expired || String(settings['마감'] || 'N').toUpperCase() === 'Y',
+    deadlineText: deadline ? deadlineText_(deadline) : '',
     departments: departments,
     gifts: gifts,
   };
+}
+
+/**
+ * 마감일시 칸을 한국 시간 기준 시각으로 바꾼다.
+ * "2026-11-24 23:59" 처럼 적는다. 시간을 빼고 날짜만 적으면 그날 밤 23:59 까지.
+ */
+function parseDeadline_(value, sheetTz) {
+  let text;
+  if (value instanceof Date) {
+    text = Utilities.formatDate(value, sheetTz, 'yyyy-MM-dd HH:mm');
+  } else {
+    text = String(value == null ? '' : value).trim();
+  }
+  const m = text.match(/^(\d{4})\D+(\d{1,2})\D+(\d{1,2})(?:\D+(\d{1,2}):(\d{2}))?/);
+  if (!m) return null;
+  const pad = function (n) { return ('0' + n).slice(-2); };
+  const hasTime = m[4] !== undefined && !(m[4] === '00' && m[5] === '00');
+  const hh = hasTime ? pad(m[4]) : '23';
+  const mm = hasTime ? m[5] : '59';
+  const iso = m[1] + '-' + pad(m[2]) + '-' + pad(m[3]) + 'T' + hh + ':' + mm + ':59+09:00';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function deadlineText_(d) {
+  const tz = 'Asia/Seoul';
+  const day = ['일', '월', '화', '수', '목', '금', '토'][Number(Utilities.formatDate(d, tz, 'u')) % 7];
+  return Utilities.formatDate(d, tz, 'M월 d일') + '(' + day + ') ' + Utilities.formatDate(d, tz, 'HH:mm');
 }
 
 /** 헤더를 제외한 시트 값 */

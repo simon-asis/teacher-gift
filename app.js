@@ -42,6 +42,8 @@
     document.title = state.title;
     $('title').textContent = state.title;
     $('notice').textContent = state.notice || '';
+    $('deadline').textContent = state.deadlineText ? '신청 마감: ' + state.deadlineText + '까지' : '';
+    show('deadline', !!state.deadlineText);
 
     var dept = $('dept');
     var current = dept.value;
