@@ -163,9 +163,9 @@
       return {
         ok: true,
         title: '교사총회 선물 신청',
-        notice: '한 해 동안 수고하신 선생님들께 드리는 선물입니다. 한 가지를 골라주세요.',
+        notice: '한 해 동안 수고 많으셨습니다. 교사 선물 취합합니다.',
         closed: false,
-        departments: ['영아부', '유치부', '유년부', '초등부', '중등부', '고등부'],
+        departments: ['유아부', '유치부', '유년부', '초등부', '청소년부'],
         gifts: gifts.map(function (g) {
           var used = list.filter(function (a) { return a.giftId === g.id; }).length;
           return Object.assign({}, g, { remaining: Math.max(0, g.total - used) });
