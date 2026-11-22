@@ -8,6 +8,7 @@
  *  - [설정] 시트 : 제목 / 안내문구 / 마감(Y 로 바꾸면 즉시 종료) / 마감일시(이 시각이 지나면 자동 종료)
  *  - [신청] 시트 : 신청시각 / 부서 / 이름 / 선물ID / 선물명 / 옵션
  *  - [집계] 시트 : 선물·옵션별 신청 수 (자동 계산)
+ *  - [기록] 시트 : 신청·변경이 일어날 때마다 한 줄씩 쌓이는 이력 (자동 생성)
  *
  * 최초 1회 setup() 함수를 실행하면 시트가 자동으로 만들어집니다.
  */
@@ -17,6 +18,7 @@ const SHEET_DEPTS = '부서';
 const SHEET_SETTINGS = '설정';
 const SHEET_APPS = '신청';
 const SHEET_SUMMARY = '집계';
+const SHEET_LOG = '기록';
 
 /** 최초 1회 실행: 시트와 예시 데이터를 만든다. (이미 있는 시트는 건드리지 않음) */
 function setup() {
@@ -152,11 +154,26 @@ function doPost(e) {
     } else {
       sh.appendRow(record);
     }
+    logChange_(record, existing);
     SpreadsheetApp.flush();
 
     return json_({ ok: true, code: existing ? 'CHANGED' : 'APPLIED', giftName: label, state: readState_() });
   } finally {
     lock.releaseLock();
+  }
+}
+
+/** [기록] 시트에 신청·변경 이력을 한 줄 남긴다. 실패해도 신청 자체는 유지한다. */
+function logChange_(record, existing) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ensureSheet_(ss, SHEET_LOG, [['시각', '부서', '이름', '구분', '선물', '옵션', '이전 선물', '이전 옵션']]);
+    ss.getSheetByName(SHEET_LOG).appendRow([
+      record[0], record[1], record[2], existing ? '변경' : '신청', record[4], record[5],
+      existing ? existing.giftName : '', existing ? existing.option : '',
+    ]);
+  } catch (err) {
+    console.error(err);
   }
 }
 
